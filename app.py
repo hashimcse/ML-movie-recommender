@@ -22,7 +22,7 @@ import streamlit as st
 #   1. TMDB_API_KEY environment variable (if you set one on your machine)
 #   2. Typed into the sidebar box when the app is running
 # Get a free key at https://www.themoviedb.org/settings/api
-DEFAULT_API_KEY = os.environ.get("bef9296b827f54a415a146e395a8a850", "bef9296b827f54a415a146e395a8a850")
+DEFAULT_API_KEY = os.environ.get("TMDB_API_KEY", "")
 
 # Always look for the pickle files next to THIS script, regardless of
 # what folder Streamlit/PyCharm was launched from.
@@ -106,13 +106,19 @@ st.write("Start typing a movie name, then pick from the matching options.")
 
 with st.sidebar:
     st.subheader("Settings")
-    api_key = st.text_input(
-        "TMDB API key (optional, for posters)",
-        value=DEFAULT_API_KEY,
+    api_key_override = st.text_input(
+        "TMDB API key (optional override, for posters)",
+        value="",
         type="password",
-        help="Get a free key at https://www.themoviedb.org/settings/api. "
-             "Leave blank to show placeholder images instead.",
+        help="Leave blank to use the app's configured key automatically. "
+             "Only fill this in if you want to use your OWN key instead "
+             "of the deployed one.",
     )
+    # Never pre-fill this field with the real key — Streamlit sends the
+    # widget's default value to the browser even for password fields, so
+    # pre-filling it would leak the key to anyone viewing the page's
+    # network traffic. The real key is used silently below instead.
+    api_key = api_key_override or DEFAULT_API_KEY
 
 movies, similarity = load_data()
 movie_titles = movies["title"].values
