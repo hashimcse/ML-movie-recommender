@@ -3,3 +3,10 @@ __pycache__/
 *.pyc
 movies.pkl
 similarity.pkl
+recommendations.pkl
+data/*.npz
+.streamlit/secrets.toml
+.env
+.test-tmp/
+.pytest_cache/
+.idea/

@@ -1,112 +1,38 @@
-"""
-train_model.py
-----------------
-Builds the movie recommendation model from the TMDB 5000 dataset
-(tmdb_5000_movies.csv and tmdb_5000_credits.csv must be in the same folder
-as this script) and saves the trained artifacts as pickle files:
+"""Build the same compact, safe model artifact used by the application."""
 
-    movies.pkl        -> cleaned dataframe (movie_id, title, tags)
-    similarity.pkl     -> cosine similarity matrix
+import argparse
+from pathlib import Path
+from time import perf_counter
 
-Run this ONCE (from PyCharm's terminal, or by right-clicking > Run):
-    python train_model.py
-
-After it finishes, run the frontend with:
-    streamlit run app.py
-"""
-
-import ast
-import os
-import pickle
-
-import pandas as pd
-from nltk.stem.porter import PorterStemmer
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MOVIES_CSV = os.path.join(BASE_DIR, "tmdb_5000_movies.csv")
-CREDITS_CSV = os.path.join(BASE_DIR, "tmdb_5000_credits.csv")
+from recommender import BASE_DIR, MODEL_PATH, Catalog, feature_matrix, read_movies, save_catalog
 
 
-def convert(obj):
-    """Turn a JSON-like string of {id, name} dicts into a list of names."""
-    return [i["name"] for i in ast.literal_eval(obj)]
+def build_model(movies_path: Path = BASE_DIR / "tmdb_5000_movies.csv",
+                credits_path: Path = BASE_DIR / "tmdb_5000_credits.csv",
+                output_path: Path = MODEL_PATH) -> Catalog:
+    for path in (movies_path, credits_path):
+        if not Path(path).is_file():
+            raise FileNotFoundError(f"Dataset not found: {path}. Supply both TMDB 5000 CSV files.")
+    movies = read_movies(movies_path, credits_path)
+    catalog = Catalog(movies, feature_matrix(movies))
+    save_catalog(catalog, output_path)
+    return catalog
 
 
-def convert_cast(obj, limit=3):
-    """Keep only the first `limit` cast member names."""
-    names = []
-    for i, item in enumerate(ast.literal_eval(obj)):
-        if i == limit:
-            break
-        names.append(item["name"])
-    return names
-
-
-def fetch_director(obj):
-    """Pull out the director's name from the crew list."""
-    for i in ast.literal_eval(obj):
-        if i["job"] == "Director":
-            return [i["name"]]
-    return []
-
-
-def stem_text(text, stemmer):
-    return " ".join(stemmer.stem(word) for word in text.split())
-
-
-def build_model():
-    if not (os.path.exists(MOVIES_CSV) and os.path.exists(CREDITS_CSV)):
-        raise FileNotFoundError(
-            "Couldn't find tmdb_5000_movies.csv / tmdb_5000_credits.csv in:\n"
-            f"  {BASE_DIR}\n"
-            "Download them and place both CSVs in the same folder as this script."
-        )
-
-    print("Loading datasets...")
-    movies = pd.read_csv(MOVIES_CSV)
-    credits = pd.read_csv(CREDITS_CSV)
-
-    movies = movies.merge(credits, on="title")
-    movies = movies[["genres", "movie_id", "keywords", "overview", "title", "cast", "crew"]]
-    movies.dropna(inplace=True)
-
-    print("Extracting genres, keywords, cast, and director...")
-    movies["genres"] = movies["genres"].apply(convert)
-    movies["keywords"] = movies["keywords"].apply(convert)
-    movies["cast"] = movies["cast"].apply(convert_cast)
-    movies["crew"] = movies["crew"].apply(fetch_director)
-    movies["overview"] = movies["overview"].apply(lambda x: x.split())
-
-    # remove spaces inside multi-word names/tags so "Sam Worthington" -> "SamWorthington"
-    for col in ["genres", "keywords", "cast", "crew"]:
-        movies[col] = movies[col].apply(lambda x: [i.replace(" ", "") for i in x])
-
-    movies["tags"] = (
-        movies["overview"] + movies["keywords"] + movies["genres"] + movies["cast"] + movies["crew"]
-    )
-
-    new_df = movies[["movie_id", "title", "tags"]].copy()
-    new_df["tags"] = new_df["tags"].apply(lambda x: " ".join(x).lower())
-
-    print("Stemming tags...")
-    ps = PorterStemmer()
-    new_df["tags"] = new_df["tags"].apply(lambda x: stem_text(x, ps))
-
-    print("Vectorizing and computing similarity matrix (this may take a moment)...")
-    cv = CountVectorizer(max_features=5000, stop_words="english")
-    vectors = cv.fit_transform(new_df["tags"]).toarray()
-    similarity = cosine_similarity(vectors)
-
-    new_df.reset_index(drop=True, inplace=True)
-
-    print("Saving movies.pkl and similarity.pkl...")
-    pickle.dump(new_df, open(os.path.join(BASE_DIR, "movies.pkl"), "wb"))
-    pickle.dump(similarity, open(os.path.join(BASE_DIR, "similarity.pkl"), "wb"))
-
-    print(f"Done! Model built for {len(new_df)} movies.")
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--movies", type=Path, default=BASE_DIR / "tmdb_5000_movies.csv")
+    parser.add_argument("--credits", type=Path, default=BASE_DIR / "tmdb_5000_credits.csv")
+    parser.add_argument("--output", type=Path, default=MODEL_PATH)
+    args = parser.parse_args()
+    started = perf_counter()
+    try:
+        catalog = build_model(args.movies, args.credits, args.output)
+    except (OSError, ValueError) as exc:
+        parser.exit(1, f"Could not build the model: {exc}\n")
+    print(f"Built {len(catalog.movies):,} movies in {perf_counter() - started:.1f}s.")
+    print(f"Saved {args.output} ({args.output.stat().st_size / 1024 / 1024:.1f} MB).")
 
 
 if __name__ == "__main__":
-    build_model()
+    main()
